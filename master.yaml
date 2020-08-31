@@ -1,0 +1,48 @@
+---
+- hosts: master
+  become: yes
+  vars_files:
+  - env_variables
+
+  tasks:
+  - name: Pulling images required for setting up a Kubernetes cluster
+    shell: kubeadm config images pull
+
+  - name: Resetting kubeadm
+    shell: kubeadm reset -f
+    register: output
+
+  - name: Initializing Kubernetes cluster
+    shell: kubeadm init --pod-network-cidr=10.244.0.0/16
+    register: output
+
+  - name: Storing Logs and Generated token for future purpose.
+    local_action: copy content={{ output.stdout }} dest={{ token_file }}
+    sudo: False 
+
+  - name: Copying required files
+    shell: |
+     mkdir -p $HOME/.kube
+     sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
+     sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+  - name: Install Network Add-on
+    shell: |
+     kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+     kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/master/aio/deploy/recommended.yaml
+
+  - name: Copy the File
+    copy: src=update_service.yaml dest=update_service.yaml
+
+  - name: Changes to KubeService
+    command: kubectl apply -f update_service.yaml
+
+  - name: Print Token for Dashboard
+    shell: |
+     name=`kubectl -n kube-system get secret | grep replicaset | awk '{print $1}'`
+     echo $name
+     kubectl -n kube-system describe secret $name
+    register: token
+
+  - debug:
+     msg: "{{ token.stdout_lines }}"
